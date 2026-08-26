@@ -595,11 +595,18 @@ static bool set_hw_render(retro_hw_context_type type)
 			break;
 
 		case RETRO_HW_CONTEXT_OPENGLES3:
+#ifndef HAVE_GLES
+			// On a desktop-GL build, prefer real GL and only fall back to ES.
+			// A GLES build must not do that: it has no desktop GL to fall back
+			// to, and a frontend that accepted the request would hand it a
+			// context the renderer cannot speak.
 			if (set_hw_render(RETRO_HW_CONTEXT_OPENGL))
 				return true;
-
+#endif
+			// The GS renderer needs geometry shaders, texture buffers and
+			// image load/store, which is ES 3.2, not 3.0.
 			hw_render.version_major = 3;
-			hw_render.version_minor = 0;
+			hw_render.version_minor = 2;
 			break;
 
 		case RETRO_HW_CONTEXT_NONE:
@@ -867,7 +874,11 @@ bool retro_load_game(const struct retro_game_info* game)
 			option_value(INT_PCSX2_OPT_GAMEPAD_RUMBLE_FORCE, KeyOptionInt::return_type)
 			);
 
+#ifdef HAVE_GLES
+	retro_hw_context_type context_type = RETRO_HW_CONTEXT_OPENGLES3;
+#else
 	retro_hw_context_type context_type = RETRO_HW_CONTEXT_OPENGL;
+#endif
 	const char* option_renderer = option_value(STRING_PCSX2_OPT_RENDERER, KeyOptionString::return_type);
 	log_cb(RETRO_LOG_INFO, "Renderer option set to: %s\n", option_renderer);
 
@@ -878,8 +889,13 @@ bool retro_load_game(const struct retro_game_info* game)
 		if (context_type != RETRO_HW_CONTEXT_NONE && set_hw_render(context_type))
 			return true;
 
+#ifdef HAVE_GLES
+		context_type = RETRO_HW_CONTEXT_OPENGLES3;
+		log_cb(RETRO_LOG_INFO, "The video driver found is not compatible, switched to OpenGL ES.\n");
+#else
 		context_type = RETRO_HW_CONTEXT_OPENGL;
 		log_cb(RETRO_LOG_INFO, "The video driver found is not compatible, switched to OpenGL.\n");
+#endif
 	}
 #ifdef _WIN32
 	else if (!std::strcmp(option_renderer, "D3D11"))

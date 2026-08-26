@@ -384,7 +384,25 @@ GL_EXT_LOAD_OPT(glTextureBarrier);
 #ifdef __unix__
 			GL_EXT_LOAD(glBlendFuncSeparate);
 #endif
-			// Check OpenGL requirements as soon as 
+#ifdef HAVE_GLES
+			// A few of these arrive on ES through an extension rather than as
+			// core, and an extension spells its entry points with the vendor
+			// suffix. The unsuffixed names loaded above come back null there,
+			// so retry with the ES spelling. Everything else this renderer
+			// uses is core in ES 3.2 and keeps the unsuffixed name.
+#define GL_EXT_LOAD_ES(ext, name)                                              \
+			if (!(ext))                                                        \
+				*(void**)&(ext) = (void*)hw_render.get_proc_address(name)
+
+			GL_EXT_LOAD_ES(glBufferStorage,   "glBufferStorageEXT");
+			GL_EXT_LOAD_ES(glClipControl,     "glClipControlEXT");
+			GL_EXT_LOAD_ES(glTextureBarrier,  "glTextureBarrierNV");
+			GL_EXT_LOAD_ES(glClearTexImage,   "glClearTexImageEXT");
+			GL_EXT_LOAD_ES(glClearTexSubImage, "glClearTexSubImageEXT");
+			GL_EXT_LOAD_ES(glCopyImageSubData, "glCopyImageSubDataEXT");
+#undef GL_EXT_LOAD_ES
+#endif
+			// Check OpenGL requirements as soon as
 			// possible so we can switch to another
 			// renderer/device
 			if (!(GLLoader::check_gl_requirements()))

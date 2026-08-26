@@ -131,4 +131,6 @@ namespace GLLoader {
 
 	/* OpenGL ES (Mobile) */
 	extern bool found_GL_EXT_buffer_storage;
+	extern bool found_GL_EXT_blend_func_extended;
+	extern bool found_GL_EXT_geometry_point_size;
 }

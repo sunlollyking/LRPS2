@@ -635,7 +635,11 @@ static const char tfx_fs_glsl_shader_raw[] =
 "// 2/ do the full depth (current depth writes are disabled)\n"
 "// 3/ restore the depth buffer for 2nd pass\n"
 "// Of course, it is likely too costly.\n"
-"#if PS_DATE == 1 || PS_DATE == 2\n"
+"// PS_ZCLAMP writes gl_FragDepth further down, and ESSL rejects a depth write\n"
+"// under early_fragment_tests outright. Desktop drivers quietly turn early-Z\n"
+"// off in that case, so excluding it here costs nothing and is the same\n"
+"// behaviour either way.\n"
+"#if (PS_DATE == 1 || PS_DATE == 2) && !PS_ZCLAMP\n"
 "layout(early_fragment_tests) in;\n"
 "#endif\n"
 "\n"
@@ -678,7 +682,7 @@ static const char tfx_fs_glsl_shader_raw[] =
 "\n"
 "    return textureLod(TextureSampler, uv, lod);\n"
 "#else\n"
-"    return textureLod(TextureSampler, uv, 0); // No lod\n"
+"    return textureLod(TextureSampler, uv, 0.0); // No lod\n"
 "#endif\n"
 "\n"
 "#endif\n"
@@ -1182,7 +1186,7 @@ static const char tfx_fs_glsl_shader_raw[] =
 "    #if PS_DITHER == 2\n"
 "    ivec2 fpos = ivec2(gl_FragCoord.xy);\n"
 "    #else\n"
-"    ivec2 fpos = ivec2(gl_FragCoord.xy / ScalingFactor.x);\n"
+"    ivec2 fpos = ivec2(gl_FragCoord.xy / float(ScalingFactor.x));\n"
 "    #endif\n"
 "    C.rgb += DitherMatrix[fpos.y&3][fpos.x&3];\n"
 "#endif\n"
@@ -1590,7 +1594,7 @@ static const char tfx_vgs_glsl_shader_raw[] =
 "    // Potentially there is faster math\n"
 "    vec2 line_vector = normalize(rt_p.xy - lt_p.xy);\n"
 "    vec2 line_normal = vec2(line_vector.y, -line_vector.x);\n"
-"    vec2 line_width  = (line_normal * PointSize) / 2;\n"
+"    vec2 line_width  = (line_normal * PointSize) / 2.0;\n"
 "\n"
 "    lt_p.xy -= line_width;\n"
 "    rt_p.xy -= line_width;\n"
@@ -1928,10 +1932,19 @@ bool GSDeviceOGL::Create()
 	// rasterization configuration
 	// ****************************************************************
 	{
+#ifndef HAVE_GLES
+		// OpenGL ES has no glPolygonMode and no extension for it. GL_FILL is
+		// the only mode it rasterises, so asking for it there is asking for
+		// the state ES is already in.
 		glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+#endif
 		glDisable(GL_CULL_FACE);
 		glEnable(GL_SCISSOR_TEST);
+#ifndef HAVE_GLES
+		// GL_MULTISAMPLE is likewise desktop-only; ES multisamples per the
+		// framebuffer's own configuration.
 		glDisable(GL_MULTISAMPLE);
+#endif
 		glDisable(GL_DITHER); // Honestly I don't know!
 	}
 

@@ -247,6 +247,47 @@ void GSShaderOGL::BindPipeline(GLuint pipe)
 std::string GSShaderOGL::GenGlslHeader(const std::string& entry, GLenum type, const std::string& macro)
 {
 	std::string header;
+#ifdef HAVE_GLES
+	// ESSL 3.20 has as core what the desktop header asks for by extension:
+	// layout binding qualifiers (420pack), separate shader objects, and image
+	// load/store. It has no defaults for precision, though, and every sampler
+	// and image type used anywhere in these shaders needs one declared or the
+	// compiler stops at the declaration.
+	header = "#version 320 es\n";
+
+	// #extension has to precede every non-preprocessor token, so it goes ahead
+	// of the precision declarations below rather than next to the stage
+	// defines. Both of these are things desktop GLSL 330 simply has:
+	//
+	//  - the fragment shader uses layout(index = 1) for dual-source blending,
+	//    which ESSL puts behind EXT_blend_func_extended;
+	//  - gl_PointSize is not a member of gl_PerVertex on ES unless
+	//    EXT_geometry_point_size says so, and the common header redeclares the
+	//    block with it in, so the geometry shader is rejected without this.
+	//
+	// Required unconditionally, and deliberately. GLLoader refuses the renderer
+	// when either is missing, so by the time a shader is built both are there.
+	// Dropping the require instead would leave the stage still using the
+	// feature, and the compiler would then object to layout(index = 1) or to
+	// gl_PointSize rather than naming the extension that is absent.
+	if (type == GL_FRAGMENT_SHADER)
+		header += "#extension GL_EXT_blend_func_extended : require\n";
+	if (type == GL_GEOMETRY_SHADER)
+		header += "#extension GL_EXT_geometry_point_size : require\n";
+
+	header += "precision highp float;\n";
+	header += "precision highp int;\n";
+	header += "precision highp sampler2D;\n";
+	header += "precision highp sampler2DArray;\n";
+	header += "precision highp isampler2D;\n";
+	header += "precision highp usampler2D;\n";
+	header += "precision highp samplerBuffer;\n";
+	header += "precision highp image2D;\n";
+	header += "precision highp iimage2D;\n";
+	header += "precision highp uimage2D;\n";
+	if (!GLLoader::found_GL_ARB_shader_image_load_store)
+		header += "#define DISABLE_GL42_image\n";
+#else
 	header = "#version 330 core\n";
 	// Need GL version 420
 	header += "#extension GL_ARB_shading_language_420pack: require\n";
@@ -258,6 +299,7 @@ std::string GSShaderOGL::GenGlslHeader(const std::string& entry, GLenum type, co
 	} else {
 		header += "#define DISABLE_GL42_image\n";
 	}
+#endif
 	if (GLLoader::vendor_id_amd || GLLoader::vendor_id_intel)
 		header += "#define BROKEN_DRIVER as_usual\n";
 
@@ -265,7 +307,11 @@ std::string GSShaderOGL::GenGlslHeader(const std::string& entry, GLenum type, co
 	// AMD/nvidia define it to 0
 	// intel window don't define it
 	// intel linux refuse to define it
+#ifdef HAVE_GLES
+	header += "#define pGL_ES 1\n";
+#else
 	header += "#define pGL_ES 0\n";
+#endif
 
 	// Allow to puts several shader in 1 files
 	switch (type) {

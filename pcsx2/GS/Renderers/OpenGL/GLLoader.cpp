@@ -67,7 +67,8 @@ namespace ReplaceGL
 
 }
 
-#ifdef _WIN32
+// Was Windows-only, for Intel iGPUs missing GL_ARB_direct_state_access. OpenGL
+// ES has no DSA at all, so every target that lacks it now shares this path.
 namespace Emulate_DSA
 {
 	// Texture entry point
@@ -95,10 +96,17 @@ namespace Emulate_DSA
 		glCopyTexSubImage2D(GL_TEXTURE_2D, level, xoffset, yoffset, x, y, width, height);
 	}
 
+#ifndef HAVE_GLES
+	// glGetTexImage does not exist on OpenGL ES; a readback there has to go
+	// through an FBO and glReadPixels. Nothing in the renderer calls this --
+	// it is here only to complete the DSA table -- so rather than write a
+	// readback path with no caller, leave the pointer alone on ES and let the
+	// link fail loudly if one ever appears.
 	void APIENTRY GetTexureImage(GLuint texture, GLint level, GLenum format, GLenum type, GLsizei bufSize, void *pixels) {
 		BindTextureUnit(7, texture);
 		glGetTexImage(GL_TEXTURE_2D, level, format, type, pixels);
 	}
+#endif
 
 	void APIENTRY TextureParameteri (GLuint texture, GLenum pname, GLint param) {
 		BindTextureUnit(7, texture);
@@ -129,14 +137,18 @@ namespace Emulate_DSA
 		glTextureStorage2D            = TextureStorage;
 		glTextureSubImage2D           = TextureSubImage;
 		glCopyTextureSubImage2D       = CopyTextureSubImage;
+#ifndef HAVE_GLES
 		glGetTextureImage             = GetTexureImage;
+#endif
 		glTextureParameteri           = TextureParameteri;
+		// Defined above but never wired up, so a DSA-less target called through
+		// a null pointer the moment a texture wanted mipmaps.
+		glGenerateTextureMipmap       = GenerateTextureMipmap;
 
 		glCreateProgramPipelines      = CreateProgramPipelines;
 		glCreateSamplers              = CreateSamplers;
 	}
 }
-#endif
 
 namespace GLLoader {
 	bool amd_legacy_buggy_driver                   = false;
@@ -148,6 +160,8 @@ namespace GLLoader {
 
 	/* OpenGL ES */
 	bool found_GL_EXT_buffer_storage               = false;
+	bool found_GL_EXT_blend_func_extended          = false;
+	bool found_GL_EXT_geometry_point_size          = false;
 
 	/* Desktop OpenGL */
 	bool found_gl_version_3_3                      = false;
@@ -167,9 +181,68 @@ namespace GLLoader {
 	bool found_GL_ARB_gpu_shader5                  = false; /* Require Ivy Bridge */
 	bool found_GL_ARB_shader_image_load_store      = false; /* Intel IB. Nvidia/AMD miss Mesa implementation. */
 
+#ifdef HAVE_GLES
+	/* Every ARB extension this renderer asks for by name, and how the same
+	 * functionality is spelled on OpenGL ES. Nothing here is reimplemented --
+	 * the entry points come from get_proc_address either way, and the enum
+	 * values are shared. Only the names the driver advertises differ.
+	 *
+	 * An empty alternatives list means the feature is core in ES 3.2, which is
+	 * the context this build asks for, so the check is simply satisfied. */
+	struct gles_alias
+	{
+		const char* arb;
+		const char* alternatives[3];
+	};
+
+	static const gles_alias gles_aliases[] = {
+		{"GL_ARB_separate_shader_objects",   {"GL_EXT_separate_shader_objects", nullptr, nullptr}},
+		{"GL_ARB_shading_language_420pack",  {nullptr, nullptr, nullptr}},
+		{"GL_ARB_texture_storage",           {"GL_EXT_texture_storage", nullptr, nullptr}},
+		{"GL_ARB_buffer_storage",            {"GL_EXT_buffer_storage", nullptr, nullptr}},
+		{"GL_ARB_copy_image",                {"GL_EXT_copy_image", "GL_OES_copy_image", nullptr}},
+		{"GL_ARB_clip_control",              {"GL_EXT_clip_control", nullptr, nullptr}},
+		{"GL_ARB_gpu_shader5",               {"GL_EXT_gpu_shader5", "GL_OES_gpu_shader5", nullptr}},
+		{"GL_ARB_shader_image_load_store",   {nullptr, nullptr, nullptr}},
+		{"GL_ARB_clear_texture",             {"GL_EXT_clear_texture", nullptr, nullptr}},
+		{"GL_ARB_texture_barrier",           {"GL_NV_texture_barrier", nullptr, nullptr}},
+		{"GL_ARB_viewport_array",            {"GL_OES_viewport_array", nullptr, nullptr}},
+		{"GL_ARB_texture_buffer_object",     {"GL_EXT_texture_buffer", "GL_OES_texture_buffer", nullptr}},
+	};
+
+	/* No GLES equivalent exists for direct state access, so it is deliberately
+	 * absent from the table above: the lookup fails, and Emulate_DSA takes
+	 * over. */
+	static bool has_extension(const std::string& ext)
+	{
+		if (GLExtension::Has(ext))
+			return true;
+
+		for (const gles_alias& alias : gles_aliases)
+		{
+			if (ext != alias.arb)
+				continue;
+
+			bool core_in_es32 = true;
+			for (const char* alt : alias.alternatives)
+			{
+				if (!alt)
+					continue;
+				core_in_es32 = false;
+				if (GLExtension::Has(alt))
+					return true;
+			}
+			return core_in_es32;
+		}
+		return false;
+	}
+#else
+	static bool has_extension(const std::string& ext) { return GLExtension::Has(ext); }
+#endif
+
 	static bool mandatory(const std::string& ext)
 	{
-		bool found = GLExtension::Has(ext);
+		bool found = has_extension(ext);
 		if (!found) /* TODO/FIXME - return error */
 			log_cb(RETRO_LOG_ERROR, "ERROR: %s is NOT SUPPORTED\n", ext.c_str());
 		return found;
@@ -177,7 +250,7 @@ namespace GLLoader {
 
 	static bool optional(const std::string& name)
 	{
-		bool found = GLExtension::Has(name);
+		bool found = has_extension(name);
 		if (!found)
 			log_cb(RETRO_LOG_WARN, "INFO: %s is NOT SUPPORTED\n", name.c_str());
 		return found;
@@ -236,8 +309,9 @@ namespace GLLoader {
 		return true;
 	}
 
-	void check_gl_supported_extension(void)
+	bool check_gl_supported_extension(void)
 	{
+		bool ok = true;
 		GLint i;
 		int max_ext = 0;
 		glGetIntegerv(GL_NUM_EXTENSIONS, &max_ext);
@@ -258,22 +332,41 @@ namespace GLLoader {
 			/* OpenGL 4.3 */
 			mandatory("GL_KHR_debug");
 			/* OpenGL 4.4 */
-			found_GL_ARB_buffer_storage = mandatory("GL_ARB_buffer_storage");
+			found_GL_ARB_buffer_storage = mandatory("GL_ARB_buffer_storage") && glBufferStorage != nullptr;
 		}
 
 
 		// Only for HW renderer
 		if (GetCurrentRendererType() == GSRendererType::OGL_HW)
 		{
-			mandatory("GL_ARB_copy_image");
-			mandatory("GL_ARB_clip_control");
+			// Both are called unconditionally further in, so a missing one is
+			// a jump through a null pointer rather than a degraded picture.
+			// Report it and let the caller refuse the renderer.
+			if (!mandatory("GL_ARB_copy_image") || !glCopyImageSubData)
+				ok = false;
+			if (!mandatory("GL_ARB_clip_control") || !glClipControl)
+				ok = false;
 		}
 
 #ifdef HAVE_GLES
 		/* OpenGL ES */
 		{
-			// Alternative for GL_ARB_buffer_storage 
-			found_GL_EXT_buffer_storage               = optional("GL_EXT_buffer_storage");
+			// Alternative for GL_ARB_buffer_storage. Its entry point is
+			// glBufferStorageEXT, loaded into the same pointer in GS.cpp, so
+			// the pointer is what decides whether it is usable.
+			found_GL_EXT_buffer_storage               = optional("GL_EXT_buffer_storage") && glBufferStorage != nullptr;
+
+			// Needed by the shaders rather than by any entry point: the
+			// fragment stage uses layout(index = 1) for dual-source blending
+			// and the geometry stage redeclares gl_PerVertex with
+			// gl_PointSize. Neither is expressible on ES without these, so
+			// refuse the renderer rather than let the shaders fail to compile
+			// -- nothing checks GL_COMPILE_STATUS, so that failure is silent
+			// and shows up as a white screen.
+			found_GL_EXT_blend_func_extended          = mandatory("GL_EXT_blend_func_extended");
+			found_GL_EXT_geometry_point_size          = mandatory("GL_EXT_geometry_point_size");
+			if (!found_GL_EXT_blend_func_extended || !found_GL_EXT_geometry_point_size)
+				ok = false;
 		}
 #endif
 
@@ -284,7 +377,7 @@ namespace GLLoader {
 			/* OpenGL 4.2 */
 			found_GL_ARB_shader_image_load_store      = optional("GL_ARB_shader_image_load_store");
 			/* OpenGL 4.4 */
-			found_GL_ARB_clear_texture                = optional("GL_ARB_clear_texture");
+			found_GL_ARB_clear_texture                = optional("GL_ARB_clear_texture") && glClearTexImage != nullptr;
 			/* OpenGL 4.5 */
 			optional("GL_ARB_direct_state_access");
 
@@ -293,32 +386,46 @@ namespace GLLoader {
 			optional("GL_ARB_texture_barrier");
 		}
 
-		if (!GLExtension::Has("GL_ARB_viewport_array"))
+		if (!has_extension("GL_ARB_viewport_array"))
 		{
 			glScissorIndexed   = ReplaceGL::ScissorIndexed;
 			glViewportIndexedf = ReplaceGL::ViewportIndexedf;
 			log_cb(RETRO_LOG_WARN, "GL_ARB_viewport_array is not supported! Function pointer will be replaced\n");
 		}
 
-		if (!GLExtension::Has("GL_ARB_texture_barrier"))
+		// The pointer is checked as well as the extension string: on ES the
+		// barrier arrives via GL_NV_texture_barrier, whose entry point is
+		// glTextureBarrierNV, so the string can be advertised while the
+		// unsuffixed pointer is still null. Calling through it would be a jump
+		// to zero rather than a missing feature.
+		if (!has_extension("GL_ARB_texture_barrier") || !glTextureBarrier)
 		{
 			glTextureBarrier = ReplaceGL::TextureBarrier;
 			log_cb(RETRO_LOG_WARN, "GL_ARB_texture_barrier is not supported! Blending emulation will not be supported\n");
 		}
 
-#ifdef _WIN32
 		// Thank you Intel for not providing support of basic features on your iGPUs.
-		if (!GLExtension::Has("GL_ARB_direct_state_access"))
+		// OpenGL ES has no direct state access at all, so this is the normal
+		// path there rather than a workaround for one vendor.
+		if (!has_extension("GL_ARB_direct_state_access"))
 			Emulate_DSA::Init();
-#endif
+
+		return ok;
 	}
 
 	bool check_gl_requirements(void)
 	{
+		// ES tops out at 3.2, and 3.2 is where geometry shaders, texture
+		// buffers and image load/store all became core -- everything this
+		// renderer needs beyond ES 3.0.
+#ifdef HAVE_GLES
+		if (!check_gl_version(3, 2))
+			return false;
+#else
 		if (!check_gl_version(3, 3))
 			return false;
+#endif
 
-		check_gl_supported_extension();
-		return true;
+		return check_gl_supported_extension();
 	}
 }

@@ -59,6 +59,11 @@ option(CMAKE_BUILD_STRIP "Srip binaries to save a couple of MB (developer option
 #-------------------------------------------------------------------------------
 option(DISABLE_ADVANCE_SIMD "Disable advance use of SIMD (SSE2+ & AVX)" OFF)
 
+# Build the GS renderer for OpenGL ES 3.2 rather than desktop OpenGL 3.3 core.
+# Needed for targets that have no desktop GL at all -- a GBM/EGL image built
+# with OPENGLES only, which is what LibreELEC's default Generic device is.
+option(HAVE_GLES "Target OpenGL ES instead of desktop OpenGL" OFF)
+
 # Print if we are cross compiling.
 if(CMAKE_CROSSCOMPILING)
     message(STATUS "Cross compilation is enabled.")

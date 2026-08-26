@@ -14,17 +14,36 @@ find_package(LibLZMA)
 # Using find_package OpenGL without either setting your opengl preference to GLVND or LEGACY
 # is deprecated as of cmake 3.11.
 set(OpenGL_GL_PREFERENCE GLVND)
-find_package(OpenGL)
+if(HAVE_GLES)
+    # OpenGL ES target. The GS renderer still builds against the desktop
+    # <GL/gl.h> and <GL/glext.h> for its enums and PFNGL* typedefs -- 274 of the
+    # 292 entry points it uses are resolved through the libretro hardware-render
+    # get_proc_address at runtime, so the headers are there for declarations
+    # only. What does need a library are the GL 1.x calls the header declares as
+    # ordinary functions, and libGLESv2 provides every one of those that this
+    # renderer calls.
+    find_library(GLES_v2_LIBRARY NAMES GLESv2)
+    if(NOT GLES_v2_LIBRARY)
+        message(FATAL_ERROR "HAVE_GLES is set but libGLESv2 was not found")
+    endif()
+    set(OPENGL_FOUND TRUE)
+    set(OPENGL_LIBRARIES ${GLES_v2_LIBRARY})
+    set(OPENGL_INCLUDE_DIR "")
+    add_definitions(-DHAVE_GLES=1)
+    message(STATUS "Building the GS renderer against OpenGL ES: ${GLES_v2_LIBRARY}")
+else()
+    find_package(OpenGL)
 
-# No GLX on a GBM/EGL target, which is the only thing FindOpenGL was missing.
-# libOpenGL exports the same entry points, so link that directly.
-if(NOT OPENGL_FOUND)
-    find_library(OPENGL_opengl_LIBRARY NAMES OpenGL)
-    if(OPENGL_opengl_LIBRARY)
-        set(OPENGL_FOUND TRUE)
-        set(OPENGL_LIBRARIES ${OPENGL_opengl_LIBRARY})
-        set(OPENGL_INCLUDE_DIR "")
-        message(STATUS "Using ${OPENGL_opengl_LIBRARY} directly: no GLX on this target")
+    # No GLX on a GBM/EGL target, which is the only thing FindOpenGL was missing.
+    # libOpenGL exports the same entry points, so link that directly.
+    if(NOT OPENGL_FOUND)
+        find_library(OPENGL_opengl_LIBRARY NAMES OpenGL)
+        if(OPENGL_opengl_LIBRARY)
+            set(OPENGL_FOUND TRUE)
+            set(OPENGL_LIBRARIES ${OPENGL_opengl_LIBRARY})
+            set(OPENGL_INCLUDE_DIR "")
+            message(STATUS "Using ${OPENGL_opengl_LIBRARY} directly: no GLX on this target")
+        endif()
     endif()
 endif()
 
