@@ -21,6 +21,7 @@
 #include <limits>
 #include <queue>
 #include <cstring> /* memcpy */
+#include <system_error>
 #include <thread>
 
 const u32 sectors_per_read = 16;

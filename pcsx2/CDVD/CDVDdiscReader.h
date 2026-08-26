@@ -23,6 +23,7 @@
 #endif
 
 #include <mutex>
+#include <string>
 #include <array>
 #include <memory> /* for unique_ptr */
 #include <vector>

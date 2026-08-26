@@ -15,6 +15,19 @@ find_package(LibLZMA)
 # is deprecated as of cmake 3.11.
 set(OpenGL_GL_PREFERENCE GLVND)
 find_package(OpenGL)
+
+# No GLX on a GBM/EGL target, which is the only thing FindOpenGL was missing.
+# libOpenGL exports the same entry points, so link that directly.
+if(NOT OPENGL_FOUND)
+    find_library(OPENGL_opengl_LIBRARY NAMES OpenGL)
+    if(OPENGL_opengl_LIBRARY)
+        set(OPENGL_FOUND TRUE)
+        set(OPENGL_LIBRARIES ${OPENGL_opengl_LIBRARY})
+        set(OPENGL_INCLUDE_DIR "")
+        message(STATUS "Using ${OPENGL_opengl_LIBRARY} directly: no GLX on this target")
+    endif()
+endif()
+
 find_package(PNG)
 set(wxWidgets_FOUND 1)
 set(wxWidgets_USE_FILE 3rdparty/wxwidgets3.0/UsewxWidgets.cmake)
