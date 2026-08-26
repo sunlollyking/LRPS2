@@ -50,7 +50,7 @@ enum class KeyOptionString
 static bool option_value(const char* const_option, KeyOptionBool return_type) {
 	struct retro_variable var = { 0 };
 	var.key = const_option;
-	if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var))
+	if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)
 	{
 		if (strcmp(var.value, "enabled") == 0)
 			return true;
@@ -61,7 +61,7 @@ static bool option_value(const char* const_option, KeyOptionBool return_type) {
 static int option_value(const char* const_option, KeyOptionInt return_type) {
 	struct retro_variable var = { 0 };
 	var.key = const_option;
-	if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var))
+	if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)
 		return atoi(var.value);
 	return 0;
 }
@@ -70,9 +70,11 @@ static const char* option_value(const char* const_option, KeyOptionString return
 {
 	struct retro_variable var = { 0 };
 	var.key = const_option;
-	if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var))
+	// The empty string rather than NULL: every caller takes this straight into
+	// wxString::Assign or strcmp without checking
+	if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)
 		return var.value;
-	return NULL;
+	return "";
 }
 
 extern void ResetContentStuffs(void);

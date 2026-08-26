@@ -55,7 +55,15 @@
 retro_audio_sample_t sample_cb;
 retro_environment_t environ_cb;
 retro_video_refresh_t video_cb;
-retro_log_printf_t log_cb;
+// Discards what the core logs. Held as the initial value of log_cb so that
+// every call through it is safe: a frontend is free to refuse
+// GET_LOG_INTERFACE, and the core logs from paths that run before it has been
+// asked -- and from paths it reaches whether the request succeeded or not.
+static void log_discard(enum retro_log_level level, const char* format, ...)
+{
+}
+
+retro_log_printf_t log_cb = log_discard;
 
 struct retro_hw_render_callback hw_render;
 
@@ -184,30 +192,55 @@ void retro_init(void)
 
 	environ_cb(RETRO_ENVIRONMENT_SET_PIXEL_FORMAT, &xrgb888);
 
-	if (environ_cb(RETRO_ENVIRONMENT_GET_LOG_INTERFACE, &log))
+	// Reset first. log_cb is a global that outlives a retro_deinit(), so a
+	// second init under a frontend that declines would otherwise go on calling
+	// the previous frontend's function after its lifetime ended.
+	log_cb  = log_discard;
+	log.log = NULL;
+	if (environ_cb(RETRO_ENVIRONMENT_GET_LOG_INTERFACE, &log) && log.log)
 		log_cb = log.log;
 
 	environ_cb(RETRO_ENVIRONMENT_GET_MESSAGE_INTERFACE_VERSION, &libretro_msg_interface_version);
-	environ_cb(RETRO_ENVIRONMENT_GET_SYSTEM_DIRECTORY, &system);
-	environ_cb(RETRO_ENVIRONMENT_GET_SAVE_DIRECTORY, &save_dir);
+
+	// Both directories are optional, and a frontend with none to give says so
+	// by returning false and leaving the pointer alone. Taking it regardless is
+	// a null dereference the moment it reaches wxString, two lines below.
+	if (!environ_cb(RETRO_ENVIRONMENT_GET_SYSTEM_DIRECTORY, &system) || !system)
+		system = "";
+	// Not the system directory as a stand-in: libretro.h calls that a
+	// backwards-compatibility measure, and a frontend that exposes the system
+	// directory read-only would fail every memory-card write. No save
+	// directory means none, and the folder creation below is skipped.
+	if (!environ_cb(RETRO_ENVIRONMENT_GET_SAVE_DIRECTORY, &save_dir) || !save_dir)
+		save_dir = "";
 
 	retroarch_system_path = system;
 
 	// checks and create save folders
 
+	// Assigned unconditionally. These are file-static and outlive a
+	// retro_deinit(), so skipping them when there is no save directory would
+	// leave a second init still pointing at the first frontend's -- and on a
+	// first init would leave them empty for the memory-card code below to
+	// treat as a relative path. Only the folders themselves depend on having
+	// somewhere to put them.
 	save_dir_root = wxFileName(wxString(save_dir), "");
 	slot1_file    = wxFileName(save_dir_root.GetPath(), "");
 	slot2_file    = wxFileName(save_dir_root.GetPath(), "");
-	save_dir_root.AppendDir("pcsx2");
-	slot1_file.AppendDir("Slot 1");
-	slot2_file.AppendDir("Slot 2");
-	
-	if (! save_dir_root.DirExists())
-		save_dir_root.Mkdir();
-	if (!slot1_file.DirExists())
-		slot1_file.Mkdir();
-	if (!slot2_file.DirExists())
-		slot2_file.Mkdir();
+
+	if (*save_dir)
+	{
+		save_dir_root.AppendDir("pcsx2");
+		slot1_file.AppendDir("Slot 1");
+		slot2_file.AppendDir("Slot 2");
+
+		if (! save_dir_root.DirExists())
+			save_dir_root.Mkdir();
+		if (!slot1_file.DirExists())
+			slot1_file.Mkdir();
+		if (!slot2_file.DirExists())
+			slot2_file.Mkdir();
+	}
 
 	// check if legacy memcards exists
 
@@ -328,14 +361,18 @@ void retro_init(void)
 			}
 	}
 
-	// check if there are bios file in the bios folders, otherwise terminates with a explicit log message
+	// Say so when there is no BIOS, but carry on. Returning here used to take
+	// every other setting with it -- the options are not handed to the frontend
+	// until the bottom of this function -- so a user without a BIOS got an
+	// emulator with an empty settings page and no indication of what it wanted.
+	// Refusing to run without one is retro_load_game()'s job, and it already
+	// does it.
 
 	if (bios_files.size() == 0)
 	{
 		std::string checked_path = bios_dir.GetFullPath().ToStdString();
 		log_cb(RETRO_LOG_ERROR, "Could not find valid BIOS files! \n");
 		log_cb(RETRO_LOG_ERROR, "Please provide required BIOS file in the following folder: '%s' \n", checked_path.c_str());
-		return;
 	}
 
 
@@ -345,6 +382,15 @@ void retro_init(void)
 		size_t f, numfiles, i = 0;
 		if (!def.key || strcmp(def.key, "pcsx2_bios")) continue;
 		numfiles = bios_files.size();
+		if (numfiles == 0)
+		{
+			// An option with no values at all is not something a frontend can
+			// render. One that names the problem is.
+			def.values[i++]   = { "none", "No BIOS found" };
+			def.values[i]     = { NULL, NULL };
+			def.default_value = def.values[0].value;
+			break;
+		}
 		for (f = 0; f != numfiles; f += 2)
 		{
 			def.values[i++] = { bios_files[f].c_str(), bios_files[f + 1].c_str() };
@@ -370,10 +416,20 @@ void retro_init(void)
 	hack_fast_invalidation    = option_value(BOOL_PCSX2_OPT_USERHACK_FAST_INVALIDATION, KeyOptionBool::return_type);
 	hack_preload_frame_data   = option_value(BOOL_PCSX2_OPT_USERHACK_PRELOAD_FRAME_DATA, KeyOptionBool::return_type);
 
-	f_bios.Assign(option_value(STRING_PCSX2_OPT_BIOS, KeyOptionString::return_type));
+	const char* selected_bios = option_value(STRING_PCSX2_OPT_BIOS, KeyOptionString::return_type);
 
-	f_bios                    = wxFileName(bios_dir.GetFullPath(), option_value(STRING_PCSX2_OPT_BIOS, KeyOptionString::return_type));
+	f_bios.Assign(selected_bios);
+
+	f_bios                    = wxFileName(bios_dir.GetFullPath(), selected_bios);
 	sel_bios_path             = f_bios.GetFullPath().ToStdString();
+
+	// Leave the selection empty unless it names a BIOS that was found. With no
+	// name -- nothing on disk so the placeholder is what is registered, or a
+	// frontend that did not answer -- wxFileName yields the BIOS directory
+	// itself, which is not empty and so slips past the check retro_load_game()
+	// makes before trusting this.
+	if (bios_files.size() == 0 || !*selected_bios)
+		sel_bios_path.clear();
 	
 	// instantiate the pcsx2 app and so some things on it
 
@@ -390,16 +446,18 @@ void retro_init(void)
 		pcsx2->AllocateCoreStuffs();
 
 		// checks and creates the shared memory cards based on user option if
-		// already set (e.g. global config + new content)
+		// already set (e.g. global config + new content). Skipped without a
+		// save directory, where the slot paths are empty and creating a card
+		// would write one into the working directory.
 
-		if (strcmp(option_value(STRING_PCSX2_OPT_MEMCARD_SLOT_1, KeyOptionString::return_type), "shared8") == 0)
+		if (*save_dir && strcmp(option_value(STRING_PCSX2_OPT_MEMCARD_SLOT_1, KeyOptionString::return_type), "shared8") == 0)
 		{
 			slot1_file.SetName(FILENAME_SHARED_MEMCARD_8);
 			slot1_file.SetExt("ps2");
 			MemCardRetro::CreateSharedMemCardIfNotExisting(slot1_file, 8);
 
 		}
-		else if (strcmp(option_value(STRING_PCSX2_OPT_MEMCARD_SLOT_1, KeyOptionString::return_type), "shared32") == 0)
+		else if (*save_dir && strcmp(option_value(STRING_PCSX2_OPT_MEMCARD_SLOT_1, KeyOptionString::return_type), "shared32") == 0)
 		{
 			slot1_file.SetName(FILENAME_SHARED_MEMCARD_32);
 			slot1_file.SetExt("ps2");
@@ -407,14 +465,14 @@ void retro_init(void)
 		}
 
 
-		if (strcmp(option_value(STRING_PCSX2_OPT_MEMCARD_SLOT_2, KeyOptionString::return_type), "shared8") == 0)
+		if (*save_dir && strcmp(option_value(STRING_PCSX2_OPT_MEMCARD_SLOT_2, KeyOptionString::return_type), "shared8") == 0)
 		{
 			slot2_file.SetName(FILENAME_SHARED_MEMCARD_8);
 			slot2_file.SetExt("ps2");
 			MemCardRetro::CreateSharedMemCardIfNotExisting(slot2_file, 8);
 
 		}
-		else if (strcmp(option_value(STRING_PCSX2_OPT_MEMCARD_SLOT_2, KeyOptionString::return_type), "shared32") == 0)
+		else if (*save_dir && strcmp(option_value(STRING_PCSX2_OPT_MEMCARD_SLOT_2, KeyOptionString::return_type), "shared32") == 0)
 		{
 			slot2_file.SetName(FILENAME_SHARED_MEMCARD_32);
 			slot2_file.SetExt("ps2");
