@@ -160,9 +160,19 @@ public:
 	virtual ~CpuInitializerSet() = default;
 };
 
+#ifndef _WIN32
+// Main memory is part of this library's image, so it is loaded within reach of
+// the code the recompilers generate. A busy host process can leave no room near
+// that code for the search below to find, and memory placed out of reach crashes.
+alignas(PCSX2_PAGESIZE) static u8 s_mainMemory[HostMemoryMap::Size];
+#endif
+
 /// Attempts to find a spot near static variables for the main memory
 static VirtualMemoryManagerPtr makeMainMemoryManager(void)
 {
+#ifndef _WIN32
+	return std::make_shared<VirtualMemoryManager>(s_mainMemory, sizeof(s_mainMemory));
+#else
 	// Everything looks nicer when the start of all the sections is a nice round looking number.
 	// Also reduces the variation in the address due to small changes in code.
 	// Breaks ASLR but so does anything else that tries to make addresses constant for our debugging pleasure
@@ -183,6 +193,7 @@ static VirtualMemoryManagerPtr makeMainMemoryManager(void)
 	}
 
 	return std::make_shared<VirtualMemoryManager>(0, HostMemoryMap::Size);
+#endif
 }
 
 // --------------------------------------------------------------------------------------

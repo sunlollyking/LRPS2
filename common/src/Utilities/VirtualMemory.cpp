@@ -77,7 +77,7 @@ static size_t pageAlign(size_t size)
     ((void)(HostSys::Munmap((uptr)(ptr), size), (ptr) = NULL))
 
 VirtualMemoryManager::VirtualMemoryManager(uptr base, size_t size, uptr upper_bounds, bool strict)
-    : m_baseptr(0), m_pageuse(nullptr), m_pages_reserved(0)
+    : m_baseptr(0), m_pageuse(nullptr), m_pages_reserved(0), m_owned(true)
 {
     if (!size) return;
 
@@ -110,10 +110,19 @@ VirtualMemoryManager::VirtualMemoryManager(uptr base, size_t size, uptr upper_bo
     m_pageuse = new std::atomic<bool>[m_pages_reserved]();
 }
 
+VirtualMemoryManager::VirtualMemoryManager(void *region, size_t size)
+    : m_baseptr((uptr)region), m_pageuse(nullptr), m_pages_reserved(size / PCSX2_PAGESIZE), m_owned(false)
+{
+    // Leave it as a reservation would: no access until a part is committed
+    HostSys::MmapResetPtr(region, m_pages_reserved * PCSX2_PAGESIZE);
+    m_pageuse = new std::atomic<bool>[m_pages_reserved]();
+}
+
 VirtualMemoryManager::~VirtualMemoryManager()
 {
     if (m_pageuse) delete[] m_pageuse;
-    if (m_baseptr) HostSys::Munmap(m_baseptr, m_pages_reserved * PCSX2_PAGESIZE);
+    if (m_baseptr && m_owned) HostSys::Munmap(m_baseptr, m_pages_reserved * PCSX2_PAGESIZE);
+    else if (m_baseptr) HostSys::MmapResetPtr((void *)m_baseptr, m_pages_reserved * PCSX2_PAGESIZE);
 }
 
 static bool VMMMarkPagesAsInUse(std::atomic<bool> *begin, std::atomic<bool> *end) {

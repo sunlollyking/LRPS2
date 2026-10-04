@@ -113,11 +113,17 @@ class VirtualMemoryManager
     // reserved memory (in pages)
     u32 m_pages_reserved;
 
+    // Whether the memory was mapped here, rather than handed over by the caller
+    bool m_owned;
+
 public:
     // If upper_bounds is nonzero and the OS fails to allocate memory that is below it,
     // Alloc() will always return null pointers
     // strict indicates that the allocation should quietly fail if the memory can't be mapped at `base`
     VirtualMemoryManager(uptr base, size_t size, uptr upper_bounds = 0, bool strict = false);
+    // Manages memory the caller already owns, such as a static array. It is
+    // reset, not unmapped, when the manager is destroyed.
+    VirtualMemoryManager(void *region, size_t size);
     ~VirtualMemoryManager();
 
     void *GetBase() const { return (void *)m_baseptr; }
