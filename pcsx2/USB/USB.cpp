@@ -47,10 +47,10 @@ static void USBCreateDevice(u32 port)
 	switch (s_port_device[port])
 	{
 		case USB_DEV_EYETOY:
-			dev = usb_eyetoy::eyetoy_create(usb_eyetoy::TYPE_EYETOY);
+			dev = usb_eyetoy::eyetoy_create(usb_eyetoy::TYPE_EYETOY, "");
 			break;
 		case USB_DEV_CAPTURE_EYE:
-			dev = usb_eyetoy::eyetoy_create(usb_eyetoy::TYPE_OV511P);
+			dev = usb_eyetoy::eyetoy_create(usb_eyetoy::TYPE_OV511P, "");
 			break;
 		default:
 			return;

@@ -6,6 +6,7 @@
 #include "USB/libretro-usb/qusb.h"
 #include "USB/usb-eyetoy/videodev.h"
 #include <mutex>
+#include <string>
 
 
 namespace usb_eyetoy
@@ -454,6 +455,7 @@ namespace usb_eyetoy
 		0x75, 0x75, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 	};
 
-	USBDevice* eyetoy_create(u32 subtype);
+	// An empty audio_device picks the microphone automatically.
+	USBDevice* eyetoy_create(u32 subtype, std::string audio_device);
 
 } // namespace usb_eyetoy

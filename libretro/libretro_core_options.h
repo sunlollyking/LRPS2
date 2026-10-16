@@ -163,7 +163,7 @@ struct retro_core_option_v2_definition option_defs_us[] = {
       STRING_PCSX2_OPT_USB_CAMERA,
       "System: USB Camera",
       "USB Camera",
-      "Plug a camera into USB port 1 for EyeToy games. Pictures come from the first webcam on the system. (Content restart required)",
+      "Plug a camera into USB port 1 for EyeToy games. Pictures come from the first webcam on the system and sound from its microphone. (Content restart required)",
       NULL,
       "system_options",
       {

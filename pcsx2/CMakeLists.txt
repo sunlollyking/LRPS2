@@ -387,15 +387,18 @@ set(pcsx2USBSources
     USB/libretro-usb/usb-ohci.cpp
     USB/usb-eyetoy/jo_mpeg.cpp
     USB/usb-eyetoy/usb-eyetoy-webcam.cpp
+    USB/usb-mic/usb-mic.cpp
     )
 if(Linux)
     list(APPEND pcsx2USBSources
         USB/usb-eyetoy/cam-jpeg.cpp
         USB/usb-eyetoy/cam-linux.cpp
+        USB/usb-mic/audiodev-alsa.cpp
         )
 else()
     list(APPEND pcsx2USBSources
         USB/usb-eyetoy/cam-noop.cpp
+        USB/usb-mic/audiodev-noop.cpp
         )
 endif()
 
@@ -411,6 +414,9 @@ set(pcsx2USBHeaders
      USB/usb-eyetoy/ov519.h
      USB/usb-eyetoy/usb-eyetoy-webcam.h
      USB/usb-eyetoy/videodev.h
+     USB/usb-mic/audiodev.h
+     USB/usb-mic/usb-audio.h
+     USB/usb-mic/usb-mic.h
      )
 
 # DebugTools sources
@@ -679,6 +685,7 @@ if(Linux)
 	set(Platform_Libs
 		${LIBUDEV_LIBRARIES}
 		${JPEG_LIBRARIES}
+		${ALSA_LIBRARIES}
 		)
 endif()
 

@@ -6,6 +6,7 @@
 #include "ov519.h"
 #include "USB/libretro-usb/USBinternal.h"
 #include "USB/libretro-usb/desc.h"
+#include "USB/usb-mic/usb-mic.h"
 
 #include <algorithm>
 #include <cstring>
@@ -22,6 +23,7 @@ namespace usb_eyetoy
 		u32 subtype;
 
 		std::unique_ptr<VideoDevice> videodev;
+		USBDevice* mic;
 		u8 regs[0xFF]; //OV519
 		u8 i2c_regs[0xFF]; //OV764x
 
@@ -103,6 +105,8 @@ namespace usb_eyetoy
 		EYETOYState* s = USB_CONTAINER_OF(dev, EYETOYState, dev);
 		reset_controller(s);
 		reset_sensor(s);
+		if (s->mic)
+			s->mic->klass.handle_reset(s->mic);
 	}
 
 	static void webcam_handle_control_eyetoy(USBDevice* dev, USBPacket* p, int request, int value, int index, int length, u8* data)
@@ -323,6 +327,11 @@ namespace usb_eyetoy
 						s->frame_step = 0;
 					}
 				}
+				else if (devep == 2)
+				{
+					if (s->mic)
+						s->mic->klass.handle_data(s->mic, p);
+				}
 				break;
 			case USB_TOKEN_OUT:
 			default:
@@ -397,10 +406,12 @@ namespace usb_eyetoy
 	{
 		EYETOYState* s = USB_CONTAINER_OF(dev, EYETOYState, dev);
 		close_camera(s);
+		if (s->mic)
+			s->mic->klass.unrealize(s->mic);
 		delete s;
 	}
 
-	USBDevice* eyetoy_create(u32 subtype)
+	USBDevice* eyetoy_create(u32 subtype, std::string audio_device)
 	{
 		std::unique_ptr<VideoDevice> videodev(VideoDevice::CreateInstance());
 		if (!videodev)
@@ -422,6 +433,8 @@ namespace usb_eyetoy
 				goto fail;
 			s->dev.klass.handle_control = webcam_handle_control_eyetoy;
 			s->dev.klass.handle_data = webcam_handle_data_eyetoy;
+
+			s->mic = usb_mic::mic_create(usb_mic::MIC_SINGSTAR, 16000, std::move(audio_device));
 		}
 		else if (subtype == TYPE_OV511P)
 		{
