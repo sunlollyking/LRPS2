@@ -40,6 +40,8 @@ namespace usb_eyetoy
 		std::mutex mpeg_mutex;
 		int frame_width;
 		int frame_height;
+		static int capture_width;
+		static int capture_height;
 		FrameFormat frame_format;
 		bool mirroring_enabled = true;
 
@@ -61,12 +63,36 @@ namespace usb_eyetoy
 			mpeg_buffer.length = len;
 		}
 
+		// Nearest-neighbour resize to the size the game asked for, for cameras that can't capture it directly.
+		static void scale_nearest(const unsigned char* src, int src_w, int src_h, unsigned char* dst, int dst_w, int dst_h,
+			int unit_bytes, int unit_pixels)
+		{
+			const int src_units = src_w / unit_pixels;
+			const int dst_units = dst_w / unit_pixels;
+			for (int y = 0; y < dst_h; y++)
+			{
+				const unsigned char* srow = src + (y * src_h / dst_h) * src_units * unit_bytes;
+				unsigned char* drow = dst + y * dst_units * unit_bytes;
+				for (int x = 0; x < dst_units; x++)
+					memcpy(drow + x * unit_bytes, srow + (x * src_units / dst_units) * unit_bytes, unit_bytes);
+			}
+		}
+
 		static void process_image(const unsigned char* data, int size)
 		{
 			constexpr int bytesPerPixel = 3;
 			const size_t comprBufSize = frame_width * frame_height * bytesPerPixel;
 			if (pixelformat == V4L2_PIX_FMT_YUYV)
 			{
+				if (size < capture_width * capture_height * 2)
+					return;
+				std::vector<u8> scaled;
+				if (capture_width != frame_width || capture_height != frame_height)
+				{
+					scaled.resize(frame_width * frame_height * 2);
+					scale_nearest(data, capture_width, capture_height, scaled.data(), frame_width, frame_height, 4, 2);
+					data = scaled.data();
+				}
 				std::vector<u8> comprBuf(comprBufSize);
 				if (frame_format == format_mpeg)
 				{
@@ -139,52 +165,61 @@ namespace usb_eyetoy
 			}
 			else if (pixelformat == V4L2_PIX_FMT_JPEG)
 			{
+				if (frame_format == format_jpeg && capture_width == frame_width && capture_height == frame_height)
+				{
+					store_mpeg_frame(data, size);
+					return;
+				}
+
+				std::vector<u8> rgbData;
+				u32 width, height;
+				if (!DecompressCamJPEG(&rgbData, &width, &height, data, size))
+					return;
+				if (static_cast<int>(width) != frame_width || static_cast<int>(height) != frame_height)
+				{
+					std::vector<u8> scaled(comprBufSize);
+					scale_nearest(rgbData.data(), width, height, scaled.data(), frame_width, frame_height, bytesPerPixel, 1);
+					rgbData = std::move(scaled);
+				}
+
 				if (frame_format == format_mpeg)
 				{
-					std::vector<u8> rgbData;
-					u32 width, height;
-					if (DecompressCamJPEG(&rgbData, &width, &height, data, size))
-					{
-						std::vector<u8> comprBuf(comprBufSize);
-						const size_t comprLen = jo_write_mpeg(comprBuf.data(), rgbData.data(), frame_width, frame_height, JO_RGB24, mirroring_enabled ? JO_FLIP_X : JO_NONE, JO_NONE);
-						store_mpeg_frame(comprBuf.data(), comprLen);
-					}
+					std::vector<u8> comprBuf(comprBufSize);
+					const size_t comprLen = jo_write_mpeg(comprBuf.data(), rgbData.data(), frame_width, frame_height, JO_RGB24, mirroring_enabled ? JO_FLIP_X : JO_NONE, JO_NONE);
+					store_mpeg_frame(comprBuf.data(), comprLen);
 				}
 				else if (frame_format == format_jpeg)
 				{
-					store_mpeg_frame(data, size);
+					std::vector<u8> comprBuf(comprBufSize);
+					if (CompressCamJPEG(&comprBuf, rgbData.data(), frame_width, frame_height, 80))
+						store_mpeg_frame(comprBuf.data(), static_cast<unsigned int>(comprBuf.size()));
 				}
 				else if (frame_format == format_yuv400)
 				{
-					std::vector<u8> rgbData;
-					u32 width, height;
-					if (DecompressCamJPEG(&rgbData, &width, &height, data, size))
-					{
-						const size_t comprLen = 80 * 64;
-						std::vector<u8> comprBuf(comprLen);
-						int in_pos = 0;
-						for (int my = 0; my < 8; my++)
-							for (int mx = 0; mx < 10; mx++)
-								for (int y = 0; y < 8; y++)
-									for (int x = 0; x < 8; x++)
+					const size_t comprLen = 80 * 64;
+					std::vector<u8> comprBuf(comprLen);
+					int in_pos = 0;
+					for (int my = 0; my < 8; my++)
+						for (int mx = 0; mx < 10; mx++)
+							for (int y = 0; y < 8; y++)
+								for (int x = 0; x < 8; x++)
+								{
+									int srcx = 4* (8*mx + x);
+									int srcy = 4* (8*my + y);
+									unsigned char* src = rgbData.data() + (srcy * frame_width + srcx) * bytesPerPixel;
+									if (srcy >= frame_height)
 									{
-										int srcx = 4* (8*mx + x);
-										int srcy = 4* (8*my + y);
-										unsigned char* src = rgbData.data() + (srcy * frame_width + srcx) * bytesPerPixel;
-										if (srcy >= frame_height)
-										{
-											comprBuf[in_pos++] = 0x01;
-										}
-										else
-										{
-											float r = src[0];
-											float g = src[1];
-											float b = src[2];
-											comprBuf[in_pos++] = 0.299f * r + 0.587f * g + 0.114f * b;
-										}
+										comprBuf[in_pos++] = 0x01;
 									}
-						store_mpeg_frame(comprBuf.data(), comprLen);
-					}
+									else
+									{
+										float r = src[0];
+										float g = src[1];
+										float b = src[2];
+										comprBuf[in_pos++] = 0.299f * r + 0.587f * g + 0.114f * b;
+									}
+								}
+					store_mpeg_frame(comprBuf.data(), comprLen);
 				}
 			}
 			else
@@ -271,8 +306,10 @@ namespace usb_eyetoy
 				CLEAR(cap);
 				if (ioctl(fd, VIDIOC_QUERYCAP, &cap) >= 0)
 				{
-					log_cb(RETRO_LOG_WARN, "Camera: %s / %s\n", dev_name, (char*)cap.card);
-					if (!selectedDevice.empty() && strcmp(selectedDevice.c_str(), (char*)cap.card) == 0)
+					log_cb(RETRO_LOG_INFO, "Camera: %s / %s\n", dev_name, (char*)cap.card);
+					const u32 caps = (cap.capabilities & V4L2_CAP_DEVICE_CAPS) ? cap.device_caps : cap.capabilities;
+					if (selectedDevice.empty() ? (caps & V4L2_CAP_VIDEO_CAPTURE) && (caps & V4L2_CAP_STREAMING) :
+					                             strcmp(selectedDevice.c_str(), (char*)cap.card) == 0)
 					{
 						goto cont;
 					}
@@ -378,6 +415,8 @@ namespace usb_eyetoy
 				return -1;
 			}
 			pixelformat = fmt.fmt.pix.pixelformat;
+			capture_width = fmt.fmt.pix.width;
+			capture_height = fmt.fmt.pix.height;
 			log_cb(RETRO_LOG_WARN, "Camera: selected format: res=%dx%d, fmt=%c%c%c%c\n", fmt.fmt.pix.width, fmt.fmt.pix.height,
 					pixelformat, pixelformat >> 8, pixelformat >> 16, pixelformat >> 24);
 

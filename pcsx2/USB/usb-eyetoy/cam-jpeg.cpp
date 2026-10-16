@@ -146,6 +146,8 @@ bool DecompressCamJPEG(std::vector<u8>* buffer, u32* width, u32* height, const u
 		return false;
 	}
 
+	*width = info.image_width;
+	*height = info.image_height;
 	buffer->resize(info.image_width * info.image_height * 3);
 
 	bool result = true;
