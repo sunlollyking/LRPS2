@@ -109,21 +109,22 @@ namespace usb_eyetoy
 							const unsigned char* src = data + (y * frame_width + x) * 2;
 							unsigned char* dst = data2 + (y * frame_width + x) * bytesPerPixel;
 
-							int y1 = (int) src[0] << 8;
+							// BT.601 limited range
+							int y1 = 298 * ((int) src[0] - 16) + 128;
 							int u  = (int) src[1] - 128;
-							int y2 = (int) src[2] << 8;
+							int y2 = 298 * ((int) src[2] - 16) + 128;
 							int v  = (int) src[3] - 128;
 
-							int r  = (y1 + (259 * v) >> 8);
-							int g  = (y1 - (88 * u) - (183 * v)) >> 8;
-							int b  = (y1 + (454 * u)) >> 8;
+							int r  = (y1 + (409 * v)) >> 8;
+							int g  = (y1 - (100 * u) - (208 * v)) >> 8;
+							int b  = (y1 + (516 * u)) >> 8;
 							dst[0] = (r > 255) ? 255 : ((r < 0) ? 0 : r);
 							dst[1] = (g > 255) ? 255 : ((g < 0) ? 0 : g);
 							dst[2] = (b > 255) ? 255 : ((b < 0) ? 0 : b);
 
-							r = (y2 + (259 * v) >> 8);
-							g = (y2 - (88 * u) - (183 * v)) >> 8;
-							b = (y2 + (454 * u)) >> 8;
+							r = (y2 + (409 * v)) >> 8;
+							g = (y2 - (100 * u) - (208 * v)) >> 8;
+							b = (y2 + (516 * u)) >> 8;
 							dst[3] = (r > 255) ? 255 : ((r < 0) ? 0 : r);
 							dst[4] = (g > 255) ? 255 : ((g < 0) ? 0 : g);
 							dst[5] = (b > 255) ? 255 : ((b < 0) ? 0 : b);

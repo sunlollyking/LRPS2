@@ -162,11 +162,8 @@ static int jo_processDU(jo_bits_t *bits, float A[64], const unsigned char htdc[9
 		if(!size) {
 			jo_writeBits(bits, 1, 6);
 			jo_writeBits(bits, run, 6);
-			if (AC < -127) {
-				jo_writeBits(bits, 128, 12);
-			} else if (AC > 127) {
-				jo_writeBits(bits, 0, 12);
-			}
+			// MPEG-2 escape: one 12-bit signed level.
+			AC = AC < -2047 ? -2047 : AC > 2047 ? 2047 : AC;
 			code = AC & 0xFFF;
 			size = 12;
 		}
@@ -232,8 +229,8 @@ unsigned long jo_write_mpeg(unsigned char *mpeg_buf, const unsigned char *raw, i
 					float r, g, b;
 					r = c[0], g = c[1], b = c[2];
 					Y[i] = (0.299f*r + 0.587f*g + 0.114f*b) * (219.f/255) + 16;
-					CBx[i] = (-0.299f*r - 0.587f*g + 0.886f*b) * (224.f/255) + 128;
-					CRx[i] = (0.701f*r - 0.587f*g - 0.114f*b) * (224.f/255) + 128;
+					CBx[i] = (-0.168736f*r - 0.331264f*g + 0.5f*b) * (224.f/255) + 128;
+					CRx[i] = (0.5f*r - 0.418688f*g - 0.081312f*b) * (224.f/255) + 128;
 				}
 				// Downsample Cb,Cr (420 format)
 				for (int i=0; i<64; ++i) {
@@ -258,8 +255,8 @@ unsigned long jo_write_mpeg(unsigned char *mpeg_buf, const unsigned char *raw, i
 						r = c[0], g = c[1], b = c[2];
 					}
 					Y[i] = (0.299f*r + 0.587f*g + 0.114f*b) * (219.f/255) + 16;
-					CBx[i] = (-0.299f*r - 0.587f*g + 0.886f*b) * (224.f/255) + 128;
-					CRx[i] = (0.701f*r - 0.587f*g - 0.114f*b) * (224.f/255) + 128;
+					CBx[i] = (-0.168736f*r - 0.331264f*g + 0.5f*b) * (224.f/255) + 128;
+					CRx[i] = (0.5f*r - 0.418688f*g - 0.081312f*b) * (224.f/255) + 128;
 				}
 				// Downsample Cb,Cr (420 format)
 				for (int i=0; i<64; ++i) {
@@ -279,14 +276,14 @@ unsigned long jo_write_mpeg(unsigned char *mpeg_buf, const unsigned char *raw, i
 					const unsigned char *c = raw + y*width*2+x*2-2;
 					if (flipx) {
 						Y[i+1]  = c[0];
-						CB[i/4] = c[1];
+						CB[(i/32)*8 + (i&15)/2] = c[1];
 						Y[i]    = c[2];
-						CR[i/4] = c[3];
+						CR[(i/32)*8 + (i&15)/2] = c[3];
 					} else {
 						Y[i]    = c[2];
-						CB[i/4] = c[3];
+						CB[(i/32)*8 + (i&15)/2] = c[3];
 						Y[i+1]  = c[4];
-						CR[i/4] = c[5];
+						CR[(i/32)*8 + (i&15)/2] = c[5];
 					}
 				}
 			}
