@@ -24,14 +24,19 @@ typedef int (*USBhandler)(void);
 
 extern USBcallback USBirq;
 
-extern s8 *usbregs, *ram;
+extern s8 *ram;
 
-#define usbRs8(mem) usbregs[(mem)&0xffff]
-#define usbRs16(mem) (*(s16 *)&usbregs[(mem)&0xffff])
-#define usbRs32(mem) (*(s32 *)&usbregs[(mem)&0xffff])
-#define usbRu8(mem) (*(u8 *)&usbregs[(mem)&0xffff])
-#define usbRu16(mem) (*(u16 *)&usbregs[(mem)&0xffff])
-#define usbRu32(mem) (*(u32 *)&usbregs[(mem)&0xffff])
+#define USB_NUM_PORTS 2
+
+enum UsbPortDevice
+{
+	USB_DEV_NONE = 0,
+	USB_DEV_EYETOY,
+	USB_DEV_CAPTURE_EYE,
+};
+
+/* Takes effect when the core thread next starts. */
+void USBSetPortDevice(unsigned port, int device);
 
 void USBconfigure();
 s32 USBinit();

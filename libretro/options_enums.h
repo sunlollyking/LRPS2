@@ -16,6 +16,7 @@
 #define STRING_PCSX2_OPT_BIOS                                 "pcsx2_bios"
 #define STRING_PCSX2_OPT_RENDERER                             "pcsx2_renderer"
 #define STRING_PCSX2_OPT_SYSTEM_LANGUAGE                      "pcsx2_system_language"
+#define STRING_PCSX2_OPT_USB_CAMERA                           "pcsx2_usb_camera"
 #define STRING_PCSX2_OPT_MEMCARD_SLOT_1                       "pcsx2_memcard_slot_1"
 #define STRING_PCSX2_OPT_MEMCARD_SLOT_2                       "pcsx2_memcard_slot_2"
 

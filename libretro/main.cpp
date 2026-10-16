@@ -27,6 +27,7 @@
 #include "../pcsx2/ps2/BiosTools.h"
 #include "memcard_retro.h"
 #include "../pcsx2/PAD/PAD.h"
+#include "../pcsx2/USB/USB.h"
 
 #include "../pcsx2/MTVU.h"
 #include "../pcsx2/GS/GSFuncs.h"
@@ -711,6 +712,14 @@ bool retro_load_game(const struct retro_game_info* game)
 	nvmFileCheck.SetExt("nvm");
 	
 	fastboot_option            = option_value(BOOL_PCSX2_OPT_FASTBOOT, KeyOptionBool::return_type);
+
+	const char* usb_camera = option_value(STRING_PCSX2_OPT_USB_CAMERA, KeyOptionString::return_type);
+	if (usb_camera && !strcmp(usb_camera, "eyetoy"))
+		USBSetPortDevice(0, USB_DEV_EYETOY);
+	else if (usb_camera && !strcmp(usb_camera, "capture_eye"))
+		USBSetPortDevice(0, USB_DEV_CAPTURE_EYE);
+	else
+		USBSetPortDevice(0, USB_DEV_NONE);
 
 	// in this case we bypass the fastboot option, forcing to enter the BIOS first run setup
 	if (! nvmFileCheck.FileExists())

@@ -14,13 +14,77 @@
  */
 
 #include <stdlib.h>
-#include <string>
-#include "svnrev.h"
+#include "Common.h"
 #include "USB.h"
+#include "libretro-usb/USBinternal.h"
+#include "usb-eyetoy/usb-eyetoy-webcam.h"
 
 USBcallback USBirq;
 
-s8 *usbregs, *ram;
+s8 *ram;
+
+/* OHCI host-controller clock-timing globals, set by ohci_create(). */
+s64 g_usb_frame_time = 0;
+s64 g_usb_bit_time   = 0;
+s64 g_usb_last_cycle = 0;
+
+static OHCIState* s_qemu_ohci     = nullptr;
+static s64        s_usb_clocks    = 0;
+static s64        s_usb_remaining = 0;
+
+static int        s_port_device[USB_NUM_PORTS] = { USB_DEV_NONE, USB_DEV_NONE };
+static USBDevice* s_usb_device[USB_NUM_PORTS]  = { nullptr, nullptr };
+
+void USBSetPortDevice(unsigned port, int device)
+{
+	if (port < USB_NUM_PORTS)
+		s_port_device[port] = device;
+}
+
+static void USBCreateDevice(u32 port)
+{
+	USBDevice* dev = nullptr;
+	switch (s_port_device[port])
+	{
+		case USB_DEV_EYETOY:
+			dev = usb_eyetoy::eyetoy_create(usb_eyetoy::TYPE_EYETOY);
+			break;
+		case USB_DEV_CAPTURE_EYE:
+			dev = usb_eyetoy::eyetoy_create(usb_eyetoy::TYPE_OV511P);
+			break;
+		default:
+			return;
+	}
+	if (!dev)
+		return;
+
+	OHCIPort& rhport = s_qemu_ohci->rhport[port];
+	rhport.port.dev = dev;
+	dev->attached = true;
+	usb_attach(&rhport.port);
+	s_usb_device[port] = dev;
+}
+
+static void USBDestroyDevice(u32 port)
+{
+	USBDevice* dev = s_usb_device[port];
+	if (!dev)
+		return;
+	if (dev->klass.unrealize)
+		dev->klass.unrealize(dev);
+	s_qemu_ohci->rhport[port].port.dev = nullptr;
+	s_usb_device[port] = nullptr;
+}
+
+int usb_get_ticks_per_second(void)
+{
+	return PSXCLK;
+}
+
+s64 usb_get_clock(void)
+{
+	return s_usb_clocks;
+}
 
 void USBconfigure()
 {
@@ -28,166 +92,127 @@ void USBconfigure()
 
 s32 USBinit()
 {
-    // Initialize memory structures here.
-    usbregs = (s8 *)calloc(0x10000, 1);
+	s_qemu_ohci = ohci_create(0x1f801600, USB_NUM_PORTS);
+	if (!s_qemu_ohci)
+		return -1;
 
-    if (usbregs == NULL)
-        return -1;
-
-    return 0;
+	s_usb_clocks     = 0;
+	s_usb_remaining  = 0;
+	g_usb_last_cycle = 0;
+	return 0;
 }
 
 void USBshutdown()
 {
-    free(usbregs);
-    usbregs = NULL;
+	if (!s_qemu_ohci)
+		return;
+	for (u32 port = 0; port < USB_NUM_PORTS; port++)
+		USBDestroyDevice(port);
+	free(s_qemu_ohci);
+	s_qemu_ohci = nullptr;
 }
 
+/* Devices stay attached across suspend/resume; the guest's USB driver
+ * would otherwise see them unplugged. */
 s32 USBopen()
 {
-    // Take care of anything else we need on opening, other then initialization.
-    return 0;
+	if (!s_qemu_ohci)
+		return -1;
+	for (u32 port = 0; port < USB_NUM_PORTS; port++)
+	{
+		if (!s_usb_device[port])
+			USBCreateDevice(port);
+	}
+	return 0;
 }
 
 void USBclose()
 {
 }
 
-// Note: actually uncommenting the read/write functions I provided here
-// caused uLauncher.elf to hang on startup, so careful when experimenting.
 u8 USBread8(u32 addr)
 {
-    u8 value = 0;
-
-    switch (addr) {
-        // Handle any appropriate addresses here.
-        case 0x1f801600:
-            break;
-
-        default:
-            //value = usbRu8(addr);
-            break;
-    }
-    return value;
+	return 0;
 }
 
 u16 USBread16(u32 addr)
 {
-    u16 value = 0;
-
-    switch (addr) {
-        // Handle any appropriate addresses here.
-        case 0x1f801600:
-            break;
-
-        default:
-            //value = usbRu16(addr);
-            break;
-    }
-    return value;
+	return 0;
 }
 
 u32 USBread32(u32 addr)
 {
-    u32 value = 0;
-
-    switch (addr) {
-        // Handle any appropriate addresses here.
-        case 0x1f801600:
-            break;
-
-        default:
-            //value = usbRu32(addr);
-            break;
-    }
-    return value;
+	if (!s_qemu_ohci)
+		return 0;
+	return ohci_mem_read(s_qemu_ohci, addr);
 }
 
 void USBwrite8(u32 addr, u8 value)
 {
-    switch (addr) {
-        // Handle any appropriate addresses here.
-        case 0x1f801600:
-            break;
-
-        default:
-            //usbRu8(addr) = value;
-            break;
-    }
 }
 
 void USBwrite16(u32 addr, u16 value)
 {
-    switch (addr) {
-        // Handle any appropriate addresses here.
-        case 0x1f801600:
-            break;
-
-        default:
-            //usbRu16(addr) = value;
-            break;
-    }
 }
 
 void USBwrite32(u32 addr, u32 value)
 {
-    switch (addr) {
-        // Handle any appropriate addresses here.
-        case 0x1f801600:
-            break;
-
-        default:
-            //usbRu32(addr) = value;
-            break;
-    }
+	if (s_qemu_ohci)
+		ohci_mem_write(s_qemu_ohci, addr, value);
 }
 
 void USBirqCallback(USBcallback callback)
 {
-    // Register USBirq, so we can trigger an interrupt with it later.
-    // It will be called as USBirq(cycles); where cycles is the number
-    // of cycles before the irq is triggered.
-    USBirq = callback;
+	USBirq = callback;
 }
 
 int _USBirqHandler(void)
 {
-    // This is our USB irq handler, so if an interrupt gets triggered,
-    // deal with it here.
-    return 0;
+	return 1;
 }
 
 USBhandler USBirqHandler(void)
 {
-    // Pass our handler to pcsx2.
-    return (USBhandler)_USBirqHandler;
+	// Pass our handler to pcsx2.
+	return (USBhandler)_USBirqHandler;
 }
 
 void USBsetRAM(void *mem)
 {
-    ram = (s8 *)mem;
+	ram = (s8 *)mem;
 }
 
-// extended funcs
 s32 USBfreeze(int mode, freezeData *data)
 {
-    // This should store or retrieve any information, for if emulation
-    // gets suspended, or for savestates.
-    switch (mode) {
-        case FREEZE_LOAD:
-            // Load previously saved data.
-            break;
-        case FREEZE_SAVE:
-            // Save data.
-            break;
-        case FREEZE_SIZE:
-            // return the size of the data.
-            break;
-    }
-    return 0;
+	return 0;
 }
 
 void USBasync(u32 cycles)
 {
-	// Optional function: Called in IopCounter.cpp.
+	if (!s_qemu_ohci)
+		return;
+
+	s_usb_remaining += cycles;
+	s_usb_clocks    += s_usb_remaining;
+	if (s_qemu_ohci->eof_timer > 0)
+	{
+		while ((u64)s_usb_remaining >= s_qemu_ohci->eof_timer)
+		{
+			s_usb_remaining -= s_qemu_ohci->eof_timer;
+			s_qemu_ohci->eof_timer = 0;
+			ohci_frame_boundary(s_qemu_ohci);
+
+			/* Break out of the loop if the bus was stopped. */
+			if (!s_qemu_ohci->eof_timer)
+				break;
+		}
+		if ((s_usb_remaining > 0) && (s_qemu_ohci->eof_timer > 0))
+		{
+			s64 m = s_qemu_ohci->eof_timer;
+			if (s_usb_remaining < m)
+				m = s_usb_remaining;
+			s_qemu_ohci->eof_timer -= m;
+			s_usb_remaining        -= m;
+		}
+	}
 }

@@ -5,6 +5,7 @@
 if (Linux)
     find_package(PCAP)
     find_package(LibXml2)
+    find_package(JPEG REQUIRED)
 endif()
 if(EXISTS ${PROJECT_SOURCE_DIR}/.git)
     find_package(Git)

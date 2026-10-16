@@ -160,6 +160,21 @@ struct retro_core_option_v2_definition option_defs_us[] = {
       "disabled"
    },
    {
+      STRING_PCSX2_OPT_USB_CAMERA,
+      "System: USB Camera",
+      "USB Camera",
+      "Plug a camera into USB port 1 for EyeToy games. Pictures come from the first webcam on the system. (Content restart required)",
+      NULL,
+      "system_options",
+      {
+         {"disabled", NULL},
+         {"eyetoy", "Sony EyeToy"},
+         {"capture_eye", "Konami Capture Eye"},
+         {NULL, NULL},
+      },
+      "disabled"
+   },
+   {
       STRING_PCSX2_OPT_MEMCARD_SLOT_1,
       "Memory Card: Slot 1",
       "Slot 1",
